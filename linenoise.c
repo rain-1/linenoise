@@ -120,6 +120,7 @@
 #define UNUSED(x) (void)(x)
 static const char *unsupported_term[] = {"dumb","cons25","emacs",NULL};
 static linenoiseCompletionCallback *completionCallback = NULL;
+static linenoiseCompletionType completionType = LINENOISE_LINE;
 static linenoiseHintsCallback *hintsCallback = NULL;
 static linenoiseFreeHintsCallback *freeHintsCallback = NULL;
 
@@ -437,6 +438,26 @@ static void linenoiseBeep(void) {
 
 /* ============================== Completion ================================ */
 
+/* This is a helper function for word completions. It retrieves the
+ * start and end index of the current word in ls->buf. The start index
+ * is inclusive, the end index is exclusive. The word length is
+ * returned. */
+static size_t getCurrentWord(struct linenoiseState *ls, size_t *start, size_t *end) {
+    char const *ws, *we;
+
+    if ((ws = memrchr(ls->buf, ' ', ls->pos)) == NULL)
+        ws = ls->buf;
+    else
+        ws++; /* within ls->buf but might be a nullbyte */
+    if ((we = strchr(ws, ' ')) == NULL)
+        we = &ls->buf[strlen(ls->buf)]; /* nullbyte */
+
+    *start = ws - ls->buf;
+    *end = we - ls->buf;
+
+    return *end - *start;
+}
+
 /* Free a list of completion option populated by linenoiseAddCompletion(). */
 static void freeCompletions(linenoiseCompletions *lc) {
     size_t i;
@@ -444,6 +465,69 @@ static void freeCompletions(linenoiseCompletions *lc) {
         free(lc->cvec[i]);
     if (lc->cvec != NULL)
         free(lc->cvec);
+}
+
+/* Helper function for invoking the completion callback. For word
+ * completions it takes care of expanding the completions. */
+static int callCompletionCallback(struct linenoiseState *ls, linenoiseCompletions *lc) {
+    char ch, *c, *buf, *comp;
+    size_t i, clen, nlen, wlen, start, end;
+
+    buf = ls->buf;
+    start = end = wlen = 0;
+
+    if (completionType == LINENOISE_WORD) {
+        ch = ls->buf[ls->pos];
+        if (ch != '\0' && ch != ' ')
+            return 0; /* cursor not positioned after a word */
+
+        wlen = getCurrentWord(ls, &start, &end);
+        if (wlen <= 0)
+            return 0;
+
+        buf = strndup(&ls->buf[start], wlen + 1);
+        if (buf == NULL)
+            return -1;
+        buf[wlen] = '\0';
+    }
+
+    completionCallback(buf, lc);
+    if (completionType == LINENOISE_WORD)
+        free(buf);
+    else
+        return 0;
+
+    for (i = 0; i < lc->len; i++) {
+        clen = strlen(lc->cvec[i]);
+        nlen = 1 + clen + strlen(ls->buf) - wlen;
+
+        comp = lc->cvec[i] = realloc(lc->cvec[i], nlen);
+        if (comp == NULL)
+            return -1;
+
+        c = memmove(&comp[start], comp, clen);
+        strncpy(comp, ls->buf, start);
+        strncpy(c + clen, &ls->buf[end], nlen - clen - start);
+    }
+
+    return 0;
+}
+
+/* Helper function for updating the cursor positon after a completion. */
+static void updateCursorPos(struct linenoiseState *ls) {
+    char *p;
+
+    switch (completionType) {
+        case LINENOISE_WORD:
+            if (ls->pos < ls->len && (p = strchr(&ls->buf[ls->pos], ' '))) {
+                ls->pos = p - ls->buf;
+                break;
+            }
+            /* fall through */
+        case LINENOISE_LINE:
+            ls->pos = ls->len;
+            break;
+    }
 }
 
 /* This is an helper function for linenoiseEdit() and is called when the
@@ -457,7 +541,11 @@ static int completeLine(struct linenoiseState *ls, char *cbuf, size_t cbuf_len, 
     int nread = 0, nwritten;
     *c = 0;
 
-    completionCallback(ls->buf,&lc);
+    if (callCompletionCallback(ls,&lc) == -1) {
+        *c = -1;
+        return nread;
+    }
+
     if (lc.len == 0) {
         linenoiseBeep();
     } else {
@@ -468,8 +556,9 @@ static int completeLine(struct linenoiseState *ls, char *cbuf, size_t cbuf_len, 
             if (i < lc.len) {
                 struct linenoiseState saved = *ls;
 
-                ls->len = ls->pos = strlen(lc.cvec[i]);
                 ls->buf = lc.cvec[i];
+                ls->len = strlen(lc.cvec[i]);
+                updateCursorPos(ls);
                 refreshLine(ls);
                 ls->len = saved.len;
                 ls->pos = saved.pos;
@@ -499,7 +588,8 @@ static int completeLine(struct linenoiseState *ls, char *cbuf, size_t cbuf_len, 
                     /* Update buffer and return */
                     if (i < lc.len) {
                         nwritten = snprintf(ls->buf,ls->buflen,"%s",lc.cvec[i]);
-                        ls->len = ls->pos = nwritten;
+                        ls->len = nwritten;
+                        updateCursorPos(ls);
                     }
                     stop = 1;
                     break;
@@ -512,8 +602,9 @@ static int completeLine(struct linenoiseState *ls, char *cbuf, size_t cbuf_len, 
 }
 
 /* Register a callback function to be called for tab-completion. */
-void linenoiseSetCompletionCallback(linenoiseCompletionCallback *fn) {
+void linenoiseSetCompletionCallback(linenoiseCompletionCallback *fn, linenoiseCompletionType t) {
     completionCallback = fn;
+    completionType = t;
 }
 
 /* Register a hits function to be called to show hits to the user at the

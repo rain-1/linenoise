@@ -10,8 +10,10 @@
 #include "utf8.h"
 #endif
 
+static linenoiseCompletionType comptype = LINENOISE_LINE;
+
 void completion(const char *buf, linenoiseCompletions *lc) {
-    if (buf[0] == 'h') {
+    if (comptype == LINENOISE_LINE && buf[0] == 'h') {
 #ifdef UTF8
         linenoiseAddCompletion(lc,"hello こんにちは");
         linenoiseAddCompletion(lc,"hello こんにちは there");
@@ -19,6 +21,14 @@ void completion(const char *buf, linenoiseCompletions *lc) {
         linenoiseAddCompletion(lc,"hello");
         linenoiseAddCompletion(lc,"hello there");
 #endif
+    }
+
+    if (comptype == LINENOISE_WORD) {
+        if (buf[0] == 'h') {
+            linenoiseAddCompletion(lc,"hello");
+        } else if (buf[0] == 't') {
+            linenoiseAddCompletion(lc,"there");
+        }
     }
 }
 
@@ -52,11 +62,14 @@ int main(int argc, char **argv) {
         if (!strcmp(*argv,"--multiline")) {
             linenoiseSetMultiLine(1);
             printf("Multi-line mode enabled.\n");
+        } else if (!strcmp(*argv,"--compwords")) {
+            comptype = LINENOISE_WORD;
+            printf("Completing words instead of lines.\n");
         } else if (!strcmp(*argv,"--keycodes")) {
             linenoisePrintKeyCodes();
             exit(0);
         } else {
-            fprintf(stderr, "Usage: %s [--multiline] [--keycodes]\n", prgname);
+            fprintf(stderr, "Usage: %s [--multiline] [--compwords] [--keycodes]\n", prgname);
             exit(1);
         }
     }
@@ -70,7 +83,7 @@ int main(int argc, char **argv) {
 
     /* Set the completion callback. This will be called every time the
      * user uses the <tab> key. */
-    linenoiseSetCompletionCallback(completion);
+    linenoiseSetCompletionCallback(completion, comptype);
     linenoiseSetHintsCallback(hints);
 
     /* Load history from file. The history file is just a plain text file

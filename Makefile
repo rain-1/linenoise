@@ -1,6 +1,6 @@
 PREFIX = /usr/local
 CC = cc
-CFLAGS = -Os -Wall -Wextra
+CFLAGS = -Os -Wall -Wextra -D_GNU_SOURCE
 
 SRC = linenoise.c utf8.c
 OBJ = $(SRC:.c=.o)
