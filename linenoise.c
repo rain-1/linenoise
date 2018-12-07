@@ -443,12 +443,13 @@ static void linenoiseBeep(void) {
  * is inclusive, the end index is exclusive. The word length is
  * returned. */
 static size_t getCurrentWord(struct linenoiseState *ls, size_t *start, size_t *end) {
+    ssize_t n;
     char const *ws, *we;
 
-    if ((ws = memrchr(ls->buf, ' ', ls->pos)) == NULL)
-        ws = ls->buf;
-    else
-        ws++; /* within ls->buf but might be a nullbyte */
+    n = ls->pos;
+    while (n-- && ls->buf[n] != ' ') ;
+    ws = (n >= 0) ? &ls->buf[++n] : ls->buf;
+
     if ((we = strchr(ws, ' ')) == NULL)
         we = &ls->buf[strlen(ls->buf)]; /* nullbyte */
 
